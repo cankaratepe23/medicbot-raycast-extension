@@ -1,0 +1,46 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# IDE Specific
+*.code-workspace
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# Raycast specific files
+raycast-env.d.ts
+.raycast-swift-build
+.swiftpm
+compiled_raycast_swift
+compiled_raycast_rust
+
+# build output
+/dist
+/build
+/out
+/coverage
+
+# caches
+.eslintcache
+.cache
+/.parcel-cache
+/.turbo
+/.nx
+/.vite
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env files
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+Thumbs.db
