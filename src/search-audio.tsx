@@ -1,8 +1,24 @@
 import { Action, ActionPanel, Icon, List, Toast, showToast } from "@raycast/api";
 import { runAppleScript, showFailureToast, useCachedPromise } from "@raycast/utils";
 import { spawn } from "child_process";
-import { useMemo, useState } from "react";
-import { AudioTrackDto, buildShareableLink, fetchAudioCatalog, fetchAudioFile } from "./medicbot";
+import { useEffect, useMemo, useState } from "react";
+import { AudioTrackDto, buildShareableLink, fetchAudioCatalog, fetchAudioFile, searchAudio } from "./medicbot";
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
 
 function buildKeywords(track: AudioTrackDto) {
   return [track.id, ...(track.aliases ?? []), ...(track.tags ?? [])].filter(Boolean);
@@ -20,7 +36,16 @@ function buildAccessories(track: AudioTrackDto) {
 }
 
 export default function SearchAudio() {
-  const { data, isLoading, revalidate, error } = useCachedPromise(fetchAudioCatalog, [], {
+  const [searchText, setSearchText] = useState("");
+  const debouncedSearchText = useDebounce(searchText, 300);
+
+  // Fetch full catalog for empty search state and fallback
+  const {
+    data: catalogData,
+    isLoading: isCatalogLoading,
+    revalidate,
+    error: catalogError,
+  } = useCachedPromise(fetchAudioCatalog, [], {
     keepPreviousData: true,
     onError: (error) => {
       showFailureToast(error, { title: "MedicBot error" });
@@ -28,11 +53,51 @@ export default function SearchAudio() {
     },
   });
 
-  const tracks = useMemo(() => data ?? [], [data]);
+  // Server-side search when there's a search query
+  const {
+    data: searchData,
+    isLoading: isSearchLoading,
+    error: searchError,
+  } = useCachedPromise(
+    async (query: string) => {
+      if (!query.trim()) return null;
+      return await searchAudio(query, 10);
+    },
+    [debouncedSearchText],
+    {
+      keepPreviousData: true,
+      onError: (error) => {
+        console.error("Error searching audio:", error);
+        // Don't show toast for search errors - we'll fall back to client-side filtering
+      },
+    },
+  );
+
+  const catalogTracks = useMemo(() => catalogData ?? [], [catalogData]);
+
+  // Determine which tracks to display:
+  // - If no search text: show full catalog (Raycast handles client-side filtering)
+  // - If search text and server results available: show server results
+  // - If search text but server error: fall back to catalog (Raycast client-side filtering)
+  const displayTracks = useMemo(() => {
+    if (!debouncedSearchText.trim()) {
+      return catalogTracks;
+    }
+    if (searchData !== null && searchData !== undefined && !searchError) {
+      return searchData;
+    }
+    // Fallback to catalog for client-side filtering on error
+    return catalogTracks;
+  }, [debouncedSearchText, searchData, searchError, catalogTracks]);
+
+  // Use server-side filtering when we have search text and valid server results
+  const useServerFiltering = debouncedSearchText.trim() && searchData !== null && !searchError;
+
+  const isLoading = isCatalogLoading || (debouncedSearchText.trim() && isSearchLoading);
   const [quickLookPaths, setQuickLookPaths] = useState<Record<string, string>>({});
 
-  const emptyTitle = error ? "Setup required" : "No audio found";
-  const emptyDescription = error instanceof Error ? error.message : "Try a different search term.";
+  const emptyTitle = catalogError ? "Setup required" : "No audio found";
+  const emptyDescription = catalogError instanceof Error ? catalogError.message : "Try a different search term.";
 
   const spawnPlayer = async (command: string, args: string[]) => {
     await new Promise<void>((resolve, reject) => {
@@ -117,9 +182,15 @@ export default function SearchAudio() {
   };
 
   return (
-    <List isLoading={isLoading} searchBarPlaceholder="Search audio by name, alias, tag, or ID">
+    <List
+      isLoading={isLoading}
+      searchBarPlaceholder="Search audio by name, alias, tag, or ID"
+      onSearchTextChange={setSearchText}
+      filtering={!useServerFiltering}
+      throttle={true}
+    >
       <List.EmptyView title={emptyTitle} description={emptyDescription} />
-      {tracks.map((track) => (
+      {displayTracks.map((track) => (
         <List.Item
           key={track.id}
           title={track.name}

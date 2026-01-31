@@ -249,6 +249,40 @@ export async function fetchAudioCatalog(): Promise<AudioTrackDto[]> {
   return (await response.json()) as AudioTrackDto[];
 }
 
+export async function searchAudio(query: string, limit: number = 10): Promise<AudioTrackDto[]> {
+  const { apiBaseUrl } = getPreferences();
+  const token = await getMedicBotAccessToken();
+  const url = `${apiBaseUrl}/Audio/Search?q=${encodeURIComponent(query)}&limit=${limit}&enriched=true`;
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (response.status === 401) {
+    await oauthClient.removeTokens();
+    const refreshedToken = await getMedicBotAccessToken();
+    const retryResponse = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${refreshedToken}`,
+      },
+    });
+
+    if (!retryResponse.ok) {
+      throw new Error(`MedicBot search failed: ${retryResponse.status}`);
+    }
+
+    return (await retryResponse.json()) as AudioTrackDto[];
+  }
+
+  if (!response.ok) {
+    throw new Error(`MedicBot search failed: ${response.status}`);
+  }
+
+  return (await response.json()) as AudioTrackDto[];
+}
+
 export async function fetchAudioFile(audioId: string): Promise<string> {
   await ensureAudioCacheDir();
 
